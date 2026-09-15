@@ -140,16 +140,22 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ShieldCrash.cpp" />
+    <ClCompile Include="windefend_c.c" />
+    <ClCompile Include="windefend_s.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="offreg.h" />
     <ClInclude Include="resource.h" />
+    <ClInclude Include="windefend_h.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ShieldCrash.rc" />
   </ItemGroup>
   <ItemGroup>
     <None Include="eicar_com.zip" />
-    <None Include="Warden.dll" />
+  </ItemGroup>
+  <ItemGroup>
+    <Midl Include="windefend.idl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
